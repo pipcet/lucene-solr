@@ -32,6 +32,7 @@ import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.uhighlight.CustomSeparatorBreakIterator;
 import org.apache.lucene.search.uhighlight.DefaultPassageFormatter;
+import org.apache.lucene.search.uhighlight.IntervalsPassageFormatter;
 import org.apache.lucene.search.uhighlight.LengthGoalBreakIterator;
 import org.apache.lucene.search.uhighlight.PassageFormatter;
 import org.apache.lucene.search.uhighlight.PassageScorer;
@@ -290,6 +291,8 @@ public class UnifiedSolrHighlighter extends SolrHighlighter implements PluginInf
       );
       String ellipsis = params.getFieldParam(fieldName, HighlightParams.TAG_ELLIPSIS, SNIPPET_SEPARATOR);
       String encoder = params.getFieldParam(fieldName, HighlightParams.ENCODER, "simple");
+      if ("intervals".equals(encoder))
+	  return new IntervalsPassageFormatter();
       return new DefaultPassageFormatter(preTag, postTag, ellipsis, "html".equals(encoder));
     }
 
