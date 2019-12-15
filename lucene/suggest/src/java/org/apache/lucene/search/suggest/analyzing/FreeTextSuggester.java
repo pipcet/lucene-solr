@@ -436,6 +436,7 @@ public class FreeTextSuggester extends Lookup implements Accountable {
       ts.reset();
       
       BytesRefBuilder[] lastTokens = new BytesRefBuilder[grams];
+      long[] lastTokenOffsets = new long[grams];
       //System.out.println("lookup: key='" + key + "'");
       
       // Run full analysis, but save only the
@@ -460,6 +461,7 @@ public class FreeTextSuggester extends Lookup implements Accountable {
         BytesRefBuilder b = new BytesRefBuilder();
         b.append(tokenBytes);
         lastTokens[gramCount-1] = b;
+        lastTokenOffsets[gramCount-1] = offsetAtt.startOffset();
       }
       ts.end();
       
@@ -661,7 +663,7 @@ public class FreeTextSuggester extends Lookup implements Accountable {
             }
             seen.add(BytesRef.deepCopyOf(lastToken));
             spare.copyUTF8Bytes(token.get());
-            LookupResult result = new LookupResult(spare.toString(), (long) (Long.MAX_VALUE * backoff * ((double) decodeWeight(completion.output)) / contextCount));
+            LookupResult result = new LookupResult(spare.toString(), (long) (Long.MAX_VALUE * backoff * ((double) decodeWeight(completion.output)) / contextCount), new BytesRef("" + lastTokenOffsets[gram] + ";" + token.length()));
             results.add(result);
             assert results.size() == seen.size();
             //System.out.println("  add result=" + result);
