@@ -291,8 +291,9 @@ public class UnifiedSolrHighlighter extends SolrHighlighter implements PluginInf
       );
       String ellipsis = params.getFieldParam(fieldName, HighlightParams.TAG_ELLIPSIS, SNIPPET_SEPARATOR);
       String encoder = params.getFieldParam(fieldName, HighlightParams.ENCODER, "simple");
-      if ("intervals".equals(encoder))
-	  return new IntervalsPassageFormatter();
+      if ("intervals".equals(encoder)) {
+        return new IntervalsPassageFormatter();
+      }
       return new DefaultPassageFormatter(preTag, postTag, ellipsis, "html".equals(encoder));
     }
 
