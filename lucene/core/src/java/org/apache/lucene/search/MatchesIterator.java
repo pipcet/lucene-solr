@@ -18,8 +18,10 @@
 package org.apache.lucene.search;
 
 import java.io.IOException;
+import java.util.function.Consumer;
 
 import org.apache.lucene.index.LeafReaderContext;
+import org.apache.lucene.index.Term;
 
 /**
  * An iterator over match positions (and optionally offsets) for a single document and field
@@ -72,6 +74,11 @@ public interface MatchesIterator {
    * Should only be called after {@link #next()} has returned {@code true}
    */
   int endOffset() throws IOException;
+
+  /**
+   * Find all matching terms
+   */
+  void getMatchingTerms(Consumer<Term> termsConsumer) throws IOException;
 
   /**
    * Returns a MatchesIterator that iterates over the positions and offsets of individual
