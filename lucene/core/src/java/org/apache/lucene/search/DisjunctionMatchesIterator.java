@@ -188,6 +188,11 @@ final class DisjunctionMatchesIterator implements MatchesIterator {
     public Query getQuery() {
       return it.getQuery();
     }
+
+    @Override
+    public void getMatchingTerms(Consumer<Term> termsConsumer) throws IOException {
+      it.getMatchingTerms(termsConsumer);
+    }
   }
 
   static MatchesIterator fromSubIterators(List<MatchesIterator> mis) throws IOException {
@@ -261,5 +266,10 @@ final class DisjunctionMatchesIterator implements MatchesIterator {
   @Override
   public Query getQuery() {
     return queue.top().getQuery();
+  }
+
+  @Override
+  public void getMatchingTerms(Consumer<Term> termsConsumer) throws IOException {
+    queue.top().getMatchingTerms(termsConsumer);
   }
 }
