@@ -131,6 +131,10 @@ abstract class PhraseWeight extends Weight {
 
         @Override
         public MatchesIterator getSubMatches() throws IOException {
+          if (matcher instanceof SloppyPhraseMatcher) {
+            SloppyPhraseMatcher smatcher = (SloppyPhraseMatcher) matcher;
+            return smatcher.getSubMatches(field);
+          }
           return null;    // phrases are treated as leaves
         }
 

@@ -25,6 +25,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -35,6 +36,8 @@ import org.apache.lucene.index.ImpactsSource;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.search.similarities.Similarity.SimScorer;
 import org.apache.lucene.util.FixedBitSet;
+import org.apache.lucene.util.IOSupplier;
+import org.apache.lucene.util.IOUtils.IOConsumer;
 
 /**
  * Find all slop-valid position-combinations (matches)
@@ -82,6 +85,8 @@ final class SloppyPhraseMatcher extends PhraseMatcher {
 
   private boolean positioned;
   private int matchLength;
+
+  private MatchesIterator cachedSubMatches = null;
 
   SloppyPhraseMatcher(PhraseQuery.PostingsAndFreq[] postings, int slop, ScoreMode scoreMode, SimScorer scorer, float matchCost, boolean captureLeadMatch) {
     super(matchCost);
@@ -169,6 +174,8 @@ final class SloppyPhraseMatcher extends PhraseMatcher {
     }
     PhrasePositions pp = pq.pop();
     assert pp != null;  // if the pq is not full, then positioned == false
+    cachedSubMatches = null;
+    getSubMatches("text"); 
     captureLead(pp);
     matchLength = end - pp.position;
     int next = pq.top().position; 
@@ -191,6 +198,8 @@ final class SloppyPhraseMatcher extends PhraseMatcher {
           matchLength = matchLength2;
         }
       }
+      cachedSubMatches = null;
+      getSubMatches("text"); 
       captureLead(pp);
     }
     positioned = false;
@@ -225,10 +234,10 @@ final class SloppyPhraseMatcher extends PhraseMatcher {
 
   @Override
   public int endPosition() {
-    int endPosition = leadPosition;
+    int endPosition = leadPosition + 1;
     for (PhrasePositions pp : phrasePositions) {
       if (pp.ord != leadOrd) {
-        endPosition = Math.max(endPosition, pp.position + pp.offset);
+        endPosition = Math.max(endPosition, pp.position + pp.offset + 1);
       }
     }
     return endPosition;
@@ -653,4 +662,81 @@ final class SloppyPhraseMatcher extends PhraseMatcher {
     return tg;
   }
 
+  public MatchesIterator getSubMatches(String field) throws IOException
+  {
+    if (cachedSubMatches != null)
+      return cachedSubMatches;
+    List<Matches> ts = new LinkedList<Matches>();
+    for (PhrasePositions pp : phrasePositions) {
+      for (Term t : pp.terms) {
+        int startPosition = pp.position + pp.offset;
+        int endPosition = pp.position + pp.offset + 1;
+        int startOffset = pp.postings.startOffset();
+        int endOffset = pp.postings.endOffset();
+        
+        IOConsumer<Consumer<Term>> terms = new IOConsumer<Consumer<Term>>() {
+          @Override
+          public void accept(Consumer<Term> input) throws IOException {
+            input.accept(t);
+          }
+        };
+        IOSupplier<MatchesIterator> mis = new IOSupplier<MatchesIterator>() {
+          private boolean first = true;
+          
+          @Override
+          public MatchesIterator get() throws IOException {
+            if (first) {
+              return new MatchesIterator() {
+                @Override
+                public boolean next() throws IOException {
+                  boolean ret = first;
+                  first = false;
+                  return ret;
+                }
+
+                @Override
+                public int startPosition() {
+                  return startPosition;
+                }
+
+                @Override
+                public int endPosition() {
+                  return endPosition;
+                }
+
+                @Override
+                public int startOffset() throws IOException {
+                  return startOffset;
+                }
+
+                @Override
+                public int endOffset() throws IOException {
+                  return endOffset;
+                }
+
+                @Override
+                public void getMatchingTerms(Consumer<Term> termsConsumer) throws IOException {
+                  termsConsumer.accept(t);
+                }
+                
+                @Override
+                public MatchesIterator getSubMatches() throws IOException {
+                  return MatchesUtils.MATCH_WITH_NO_TERMS.getMatches(field);
+                }
+
+                @Override
+                public Query getQuery() {
+                  return null;
+                }
+              };
+            }
+            return null;
+          }
+        };
+        ts.add(MatchesUtils.forField(field, terms, mis));
+      }
+    }
+    
+    return cachedSubMatches = MatchesUtils.fromSubMatches(ts).getMatches(field);
+  }
 }

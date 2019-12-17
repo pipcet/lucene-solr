@@ -24,9 +24,11 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.AnalyzerWrapper;
@@ -59,16 +61,22 @@ import org.apache.lucene.index.Term;
 import org.apache.lucene.search.BooleanClause.Occur;
 import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.BooleanQuery;
+import org.apache.lucene.search.Explanation;
 import org.apache.lucene.search.FieldDoc;
 import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.Matches;
+import org.apache.lucene.search.MatchesIterator;
+import org.apache.lucene.search.PhraseQuery;
 import org.apache.lucene.search.PrefixQuery;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.search.ScoreMode;
 import org.apache.lucene.search.SearcherManager;
 import org.apache.lucene.search.Sort;
 import org.apache.lucene.search.SortField;
 import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.search.TopFieldCollector;
 import org.apache.lucene.search.TopFieldDocs;
+import org.apache.lucene.search.Weight;
 import org.apache.lucene.search.suggest.InputIterator;
 import org.apache.lucene.search.suggest.Lookup;
 import org.apache.lucene.store.DataInput;
@@ -451,10 +459,13 @@ public class AnalyzingInfixSuggester extends Lookup implements Closeable {
    * e.g. to change the index options
    */
   protected FieldType getTextFieldType(){
-    FieldType ft = new FieldType(TextField.TYPE_NOT_STORED);
-    ft.setIndexOptions(IndexOptions.DOCS);
-    ft.setOmitNorms(true);
-
+    FieldType ft = new FieldType(TextField.TYPE_STORED);
+    ft.setIndexOptions(IndexOptions.DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS);
+    ft.setOmitNorms(false);
+    ft.setStoreTermVectorOffsets(true);
+    ft.setStoreTermVectorPayloads(true);
+    ft.setStoreTermVectorPositions(true);
+    ft.setStoreTermVectors(true);
     return ft;
   }
 
@@ -574,11 +585,13 @@ public class AnalyzingInfixSuggester extends Lookup implements Closeable {
       String lastToken = null;
       query = new BooleanQuery.Builder();
       int maxEndOffset = -1;
+      List<String> tokens = new LinkedList<>();
       matchedTokens = new HashSet<>();
       while (ts.incrementToken()) {
         if (lastToken != null) {  
           matchedTokens.add(lastToken);
-          query.add(new TermQuery(new Term(TEXT_FIELD_NAME, lastToken)), occur);
+          tokens.add(lastToken);
+          //query.add(new TermQuery(new Term(TEXT_FIELD_NAME, lastToken)), occur);
         }
         lastToken = termAtt.toString();
         if (lastToken != null) {
@@ -588,14 +601,14 @@ public class AnalyzingInfixSuggester extends Lookup implements Closeable {
       ts.end();
 
       if (lastToken != null) {
-        Query lastQuery;
+        Query lastQuery = null;
         if (maxEndOffset == offsetAtt.endOffset()) {
           // Use PrefixQuery (or the ngram equivalent) when
           // there was no trailing discarded chars in the
           // string (e.g. whitespace), so that if query does
           // not end with a space we show prefix matches for
           // that token:
-          lastQuery = getLastTokenQuery(lastToken);
+          //lastQuery = getLastTokenQuery(lastToken);
           prefixToken = lastToken;
         } else {
           // Use TermQuery for an exact match if there were
@@ -603,13 +616,28 @@ public class AnalyzingInfixSuggester extends Lookup implements Closeable {
           // that if query ends with a space we only show
           // exact matches for that term:
           matchedTokens.add(lastToken);
-          lastQuery = new TermQuery(new Term(TEXT_FIELD_NAME, lastToken));
+          tokens.add(lastToken);
+          //lastQuery = new TermQuery(new Term(TEXT_FIELD_NAME, lastToken));
         }
         
         if (lastQuery != null) {
-          query.add(lastQuery, occur);
+          //query.add(lastQuery, occur);
         }
       }
+
+      PhraseQuery.Builder builder = new PhraseQuery.Builder();
+      int i = 0;
+      for (String token : tokens)
+        builder.add(new Term(TEXT_FIELD_NAME, token), i++);
+      builder.setSlop(5);
+      PhraseQuery pq = builder.build();
+      query.add(pq, occur);
+      String queryString = "";
+      
+      for (String token : tokens) {
+        queryString += token + " ";
+      }
+      //query.add(new TermQuery(new Term(TEXT_FIELD_NAME, queryString.substring(0, queryString.length()-1))), occur);
 
       if (contextQuery != null) {
         boolean allMustNot = true;
@@ -660,7 +688,38 @@ public class AnalyzingInfixSuggester extends Lookup implements Closeable {
       searcher.search(finalQuery, c);
 
       TopFieldDocs hits = c.topDocs();
-
+      for (int i = 0; i < hits.scoreDocs.length; i++) {
+        Weight weight = searcher.createWeight(finalQuery, ScoreMode.COMPLETE, 1.0f);
+        for (LeafReaderContext leaf : searcher.getIndexReader().getContext().leaves()) {
+          Matches matches = weight.matches(leaf, hits.scoreDocs[i].doc);
+          Consumer<Term> termsConsumer = t -> {
+            System.out.println("term " + t);
+          };
+          matches.getMatchingTerms(termsConsumer);
+          for (MatchesIterator mit = matches.getMatches(TEXT_FIELD_NAME); mit.next();) {
+            System.out.println("match at " + mit.startOffset() + "/" + mit.startPosition() + " - " + mit.endOffset() + "/" + mit.endPosition());
+            
+            for (Matches submatches : matches.getSubMatches()) {
+              submatches.getMatchingTerms(t -> {
+                System.out.println("subterm " + t);
+              });
+              for (MatchesIterator mit2 = submatches.getMatches(TEXT_FIELD_NAME); (mit2 != null) && mit2.next();) {
+                mit2.getMatchingTerms(t -> {
+                  System.out.println("subterm " + t);
+                });
+                System.out.println("submatch at " + mit2.startOffset() + "/" + mit2.startPosition() + " - " + mit2.endOffset() + "/" + mit2.endPosition());
+              }
+            }
+            for (MatchesIterator mit2 = mit.getSubMatches(); (mit2 != null) && mit2.next();) {
+              mit2.getMatchingTerms(t -> {
+                System.out.println("subterm " + t);
+              });
+              System.out.println("submatch at " + mit2.startOffset() + "/" + mit2.startPosition() + " - " + mit2.endOffset() + "/" + mit2.endPosition());
+            }
+          }
+        }
+      }
+        
       // Slower way if postings are not pre-sorted by weight:
       // hits = searcher.search(query, null, num, SORT);
       results = createResults(searcher, hits, num, key, doHighlight, matchedTokens, prefixToken);

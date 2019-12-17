@@ -77,7 +77,7 @@ abstract class PhraseMatcher {
   abstract int startPosition();
 
   /**
-   * The end position of the current match
+   * The (exclusive) end position of the current match
    */
   abstract int endPosition();
 
